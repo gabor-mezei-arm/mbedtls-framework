@@ -107,7 +107,9 @@ def compile_c_file(c_filename, exe_filename, include_dirs):
     else:
         cmd += ['-o' + exe_filename]
 
-    subprocess.check_call(cmd + [c_filename])
+    subprocess.check_output(cmd + [c_filename],
+                            stderr=subprocess.PIPE,
+                            universal_newlines=True)
 
 def get_c_expression_values(
         cast_to, printf_format,
@@ -157,6 +159,11 @@ def get_c_expression_values(
             os.remove(c_name)
         output = subprocess.check_output([exe_name])
         return output.decode('ascii').strip().split('\n')
+
+    except subprocess.CalledProcessError as e:
+        print(e.stderr)
+        raise e
+
     finally:
         remove_file_if_exists(exe_name)
         remove_file_if_exists(obj_name)
