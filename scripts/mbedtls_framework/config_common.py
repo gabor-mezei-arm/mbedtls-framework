@@ -7,6 +7,7 @@
 ## SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
 ##
 
+import argparse
 import os
 import re
 
@@ -730,128 +731,122 @@ class CombinedConfig(Config):
 
         return self._get_configfile(name).filename
 
-if __name__ == '__main__':
-    #pylint: disable=too-many-statements
-    def main():
-        """Command line mbedtls_config.h manipulation tool."""
-        parser = argparse.ArgumentParser(description="""
-        Mbed TLS configuration file manipulation tool.
-        """)
-        parser.add_argument('--file', '-f',
-                            help="""File to read (and modify if requested).
-                            Default: {}.
-                            """.format(MbedTLSConfigFile.default_path))
-        parser.add_argument('--cryptofile', '-c',
-                            help="""Crypto file to read (and modify if requested).
-                            Default: {}.
-                            """.format(CryptoConfigFile.default_path))
-        parser.add_argument('--force', '-o',
-                            action='store_true',
-                            help="""For the set command, if SYMBOL is not
-                            present, add a definition for it.""")
-        parser.add_argument('--write', '-w', metavar='FILE',
-                            help="""File to write to instead of the input file.""")
-        subparsers = parser.add_subparsers(dest='command',
-                                           title='Commands')
-        parser_get = subparsers.add_parser('get',
-                                           help="""Find the value of SYMBOL
-                                           and print it. Exit with
-                                           status 0 if a #define for SYMBOL is
-                                           found, 1 otherwise.
-                                           """)
+class ConfigTool(metaclass=ABCMeta):
+    """Command line config manipulation tool."""
+
+    def __init__(self, file_type):
+        """Create parser for config manipulation tool."""
+
+        self.parser = argparse.ArgumentParser(description="""
+                                              Configuration file manipulation tool.""")
+        self.subparsers = self.parser.add_subparsers(dest='command',
+                                                title='Commands')
+        self._common_parser_options(file_type)
+        self.custom_parser_options()
+        self.parser_args = self.parser.parse_args()
+        self.config = None
+
+    def add_adapter(self, name, function, description):
+        subparser = self.subparsers.add_parser(name, help=description)
+        subparser.set_defaults(adapter=function)
+
+    def _common_parser_options(self, file_type):
+        """Common parser options for config manipulation tool."""
+
+        self.parser.add_argument(
+            '--file', '-f',
+            help="""File to read (and modify if requested). Default: {}.
+                 """.format(file_type.default_path))
+        self.parser.add_argument(
+            '--force', '-o',
+            action='store_true',
+            help="""For the set command, if SYMBOL is not present, add a definition for it.""")
+        self.parser.add_argument(
+            '--write', '-w',
+            metavar='FILE',
+            help="""File to write to instead of the input file.""")
+
+        parser_get = self.subparsers.add_parser(
+            'get',
+            help="""Find the value of SYMBOL and print it. Exit with
+                 status 0 if a #define for SYMBOL is found, 1 otherwise.""")
         parser_get.add_argument('symbol', metavar='SYMBOL')
-        parser_set = subparsers.add_parser('set',
-                                           help="""Set SYMBOL to VALUE.
-                                           If VALUE is omitted, just uncomment
-                                           the #define for SYMBOL.
-                                           Error out of a line defining
-                                           SYMBOL (commented or not) is not
-                                           found, unless --force is passed.
-                                           """)
+        parser_set = self.subparsers.add_parser(
+            'set',
+            help="""Set SYMBOL to VALUE. If VALUE is omitted, just uncomment
+                 the #define for SYMBOL. Error out of a line defining
+                 SYMBOL (commented or not) is not found, unless --force is passed. """)
         parser_set.add_argument('symbol', metavar='SYMBOL')
-        parser_set.add_argument('value', metavar='VALUE', nargs='?',
-                                default='')
-        parser_set_all = subparsers.add_parser('set-all',
-                                               help="""Uncomment all #define
-                                               whose name contains a match for
-                                               REGEX.""")
+        parser_set.add_argument('value', metavar='VALUE', nargs='?', default='')
+        parser_set_all = self.subparsers.add_parser('set-all',
+                                                    help="""Uncomment all #define
+                                                    whose name contains a match for
+                                                    REGEX.""")
         parser_set_all.add_argument('regexs', metavar='REGEX', nargs='*')
-        parser_unset = subparsers.add_parser('unset',
-                                             help="""Comment out the #define
-                                             for SYMBOL. Do nothing if none
-                                             is present.""")
+        parser_unset = self.subparsers.add_parser(
+            'unset',
+            help="""Comment out the #define for SYMBOL. Do nothing if none is present.""")
         parser_unset.add_argument('symbol', metavar='SYMBOL')
-        parser_unset_all = subparsers.add_parser('unset-all',
-                                                 help="""Comment out all #define
-                                                 whose name contains a match for
-                                                 REGEX.""")
+        parser_unset_all = self.subparsers.add_parser(
+            'unset-all',
+            help="""Comment out all #define whose name contains a match for REGEX.""")
         parser_unset_all.add_argument('regexs', metavar='REGEX', nargs='*')
 
-        def add_adapter(name, function, description):
-            subparser = subparsers.add_parser(name, help=description)
-            subparser.set_defaults(adapter=function)
-        add_adapter('baremetal', baremetal_adapter,
-                    """Like full, but exclude features that require platform
-                    features such as file input-output.""")
-        add_adapter('baremetal_size', baremetal_size_adapter,
-                    """Like baremetal, but exclude debugging features.
-                    Useful for code size measurements.""")
-        add_adapter('full', full_adapter,
-                    """Uncomment most features.
-                    Exclude alternative implementations and platform support
-                    options, as well as some options that are awkward to test.
-                    """)
-        add_adapter('full_no_deprecated', no_deprecated_adapter(full_adapter),
-                    """Uncomment most non-deprecated features.
-                    Like "full", but without deprecated features.
-                    """)
-        add_adapter('full_no_platform', no_platform_adapter(full_adapter),
-                    """Uncomment most non-platform features.
-                    Like "full", but without platform features.
-                    """)
-        add_adapter('realfull', realfull_adapter,
-                    """Uncomment all boolean #defines.
-                    Suitable for generating documentation, but not for building.""")
-        add_adapter('crypto', crypto_adapter(None),
-                    """Only include crypto features. Exclude X.509 and TLS.""")
-        add_adapter('crypto_baremetal', crypto_adapter(baremetal_adapter),
-                    """Like baremetal, but with only crypto features,
-                    excluding X.509 and TLS.""")
-        add_adapter('crypto_full', crypto_adapter(full_adapter),
-                    """Like full, but with only crypto features,
-                    excluding X.509 and TLS.""")
+        self.add_adapter('baremetal', baremetal_adapter,
+                         """Like full, but exclude features that require platform
+                         features such as file input-output.""")
+        self.add_adapter('baremetal_size', baremetal_size_adapter,
+                         """Like baremetal, but exclude debugging features.
+                         Useful for code size measurements.""")
+        self.add_adapter('full', full_adapter,
+                         """Uncomment most features.
+                         Exclude alternative implementations and platform support
+                         options, as well as some options that are awkward to test.
+                         """)
+        self.add_adapter('full_no_deprecated', no_deprecated_adapter(full_adapter),
+                         """Uncomment most non-deprecated features.
+                         Like "full", but without deprecated features.
+                         """)
+        self.add_adapter('full_no_platform', no_platform_adapter(full_adapter),
+                         """Uncomment most non-platform features.
+                         Like "full", but without platform features.
+                         """)
+        self.add_adapter('realfull', realfull_adapter,
+                         """Uncomment all boolean #defines.
+                         Suitable for generating documentation, but not for building.
+                         """)
 
-        args = parser.parse_args()
-        config = CombinedConfig(MbedTLSConfigFile(args.file), CryptoConfigFile(args.cryptofile))
-        if args.command is None:
-            parser.print_help()
+    def custom_parser_options(self):
+        pass
+
+    def main(self):
+        """Common main fuction for config manipulation tool."""
+
+        if self.parser_args.command is None:
+            self.parser.print_help()
             return 1
-        elif args.command == 'get':
-            if args.symbol in config:
-                value = config[args.symbol]
+        if self.parser_args.command == 'get':
+            if self.parser_args.symbol in self.config:
+                value = self.config[self.parser_args.symbol]
                 if value:
                     sys.stdout.write(value + '\n')
-            return 0 if args.symbol in config else 1
-        elif args.command == 'set':
-            if not args.force and args.symbol not in config.settings:
-                sys.stderr.write("A #define for the symbol {} "
-                                 "was not found in {}\n"
-                                 .format(args.symbol, config.filename(args.symbol)))
+            return 0 if self.parser_args.symbol in self.config else 1
+        elif self.parser_args.command == 'set':
+            if not self.parser_args.force and self.parser_args.symbol not in self.config.settings:
+                sys.stderr.write(
+                    "A #define for the symbol {} was not found in {}\n"
+                    .format(self.parser_args.symbol,
+                            self.config.filename(self.parser_args.symbol)))
                 return 1
-            config.set(args.symbol, value=args.value)
-        elif args.command == 'set-all':
-            config.change_matching(args.regexs, True)
-        elif args.command == 'unset':
-            config.unset(args.symbol)
-        elif args.command == 'unset-all':
-            config.change_matching(args.regexs, False)
+            self.config.set(self.parser_args.symbol, value=self.parser_args.value)
+        elif self.parser_args.command == 'set-all':
+            self.config.change_matching(self.parser_args.regexs, True)
+        elif self.parser_args.command == 'unset':
+            self.config.unset(self.parser_args.symbol)
+        elif self.parser_args.command == 'unset-all':
+            self.config.change_matching(self.parser_args.regexs, False)
         else:
-            config.adapt(args.adapter)
-        config.write(args.write)
-        return 0
+            self.config.adapt(self.parser_args.adapter)
+        self.config.write(self.parser_args.write)
 
-    # Import modules only used by main only if main is defined and called.
-    # pylint: disable=wrong-import-position
-    import argparse
-    import sys
-    sys.exit(main())
+        return 0
