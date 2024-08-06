@@ -197,10 +197,6 @@ PSA_UNSTABLE_FEATURE = frozenset([
     'PSA_WANT_ECC_SECP_K1_224'
 ])
 
-EXCLUDE_FROM_CRYPTO = PSA_UNSUPPORTED_FEATURE | \
-                      PSA_DEPRECATED_FEATURE | \
-                      PSA_UNSTABLE_FEATURE
-
 # The goal of the full configuration is to have everything that can be tested
 # together. This includes deprecated or insecure options. It excludes:
 # * Options that require additional build dependencies or unusual hardware.
@@ -339,36 +335,6 @@ def baremetal_size_adapter(name, active, section):
     if name in EXCLUDE_FOR_SIZE:
         return False
     return baremetal_adapter(name, active, section)
-
-def include_in_crypto(name):
-    """Rules for symbols in a crypto configuration."""
-    if name.startswith('MBEDTLS_X509_') or \
-       name.startswith('MBEDTLS_SSL_') or \
-       name.startswith('MBEDTLS_KEY_EXCHANGE_'):
-        return False
-    if name in [
-            'MBEDTLS_DEBUG_C', # part of libmbedtls
-            'MBEDTLS_NET_C', # part of libmbedtls
-            'MBEDTLS_PKCS7_C', # part of libmbedx509
-    ]:
-        return False
-    if name in EXCLUDE_FROM_CRYPTO:
-        return False
-    return True
-
-def crypto_adapter(adapter):
-    """Modify an adapter to disable non-crypto symbols.
-
-    ``crypto_adapter(adapter)(name, active, section)`` is like
-    ``adapter(name, active, section)``, but unsets all X.509 and TLS symbols.
-    """
-    def continuation(name, active, section):
-        if not include_in_crypto(name):
-            return False
-        if adapter is None:
-            return active
-        return adapter(name, active, section)
-    return continuation
 
 DEPRECATED = frozenset([
     'MBEDTLS_PSA_CRYPTO_SE_C',
